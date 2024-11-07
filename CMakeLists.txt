@@ -7,15 +7,19 @@ endif()
 
 # find dependencies
 find_package(ament_cmake REQUIRED)
-find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(tf2_ros REQUIRED)
 # uncomment the following section in order to fill in
 # further dependencies manually.
 # find_package(<dependency> REQUIRED)
 
 # Add executables
 add_executable(judge_rtk_status src/judge_rtk_status.cpp)
-ament_target_dependencies(judge_rtk_status rclcpp sensor_msgs)
+ament_target_dependencies(judge_rtk_status rclcpp sensor_msgs tf2_geometry_msgs nav_msgs geometry_msgs tf2_ros)
 
 # Install Cpp executables
 install(TARGETS
