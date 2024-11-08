@@ -38,17 +38,16 @@ public:
 private:
     void timer_callback()
     {
-        if(status_flag && ublox_flag && gnss_flag && odrive_flag){
+        if(ublox_flag && gnss_flag && odrive_flag){
 
             current_time = this->get_clock()->now();
-            double x = 0, y = 0;
 
             if(status_flag){
                 x = gnss_x;
                 y = gnss_y;
             }else{
-                x = odrive_x;
-                y = odrive_y;
+                x += diff_odrive_x;
+                y += diff_odrive_y;
             }
 
             tf2::Quaternion odom_quat;
@@ -114,13 +113,20 @@ private:
         double roll_tmp, pitch_tmp, yaw_tmp;
         mat.getRPY(roll_tmp, pitch_tmp, yaw_tmp);
 
-        yaw = yaw_tmp + M_PI;
+        yaw = yaw_tmp;
         RCLCPP_INFO(this->get_logger(), "yaw: %lf", yaw);
         odrive_flag = true;
 
         // 並進速度(vx)と角速度(vth)の取得
         vx = msg->twist.twist.linear.x;
         vth = msg->twist.twist.angular.z;
+
+        //移動量を計算
+        diff_odrive_x = odrive_x - pre_odrive_x;
+        diff_odrive_y = odrive_y - pre_odrive_y;
+
+        pre_odrive_x = odrive_x;
+        pre_odrive_y = odrive_y;
     }
 
     void send_static_transform()
@@ -150,7 +156,8 @@ private:
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::Time current_time;
 
-    double gnss_x, gnss_y, odrive_x, odrive_y, yaw, vx, vth;
+    double x, y, gnss_x, gnss_y, odrive_x, odrive_y, yaw, vx, vth;
+    double pre_odrive_x = 0, pre_odrive_y = 0, diff_odrive_x = 0, diff_odrive_y = 0;
     bool status_flag = false, ublox_flag = false, gnss_flag = false, odrive_flag = false;
 };
 
