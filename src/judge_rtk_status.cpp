@@ -23,7 +23,7 @@ public:
         odrive_odom_sub = this->create_subscription<nav_msgs::msg::Odometry>(
         "odrive_odom", 10, std::bind(&GPSSubscriber::odometry_callback, this, _1));
 
-        switch_odom_pub = this->create_publisher<nav_msgs::msg::Odometry>("switch_odom", 50);
+        switch_odom_pub = this->create_publisher<nav_msgs::msg::Odometry>("switch_odom", 10);
 
         odom_broadcaster = std::make_shared<tf2_ros::TransformBroadcaster>(*this);
 
@@ -45,9 +45,54 @@ private:
             if(status_flag){
                 x = gnss_x;
                 y = gnss_y;
+                double dgx = x - pre_gnss_x;
+                double dgy = y - pre_gnss_y;
+                double dist_gnss = std::hypot(dgx, dgy);
+                RCLCPP_INFO(this->get_logger(), "vx, dist_gnss:%lf, %lf",vx, dist_gnss);
+                if(vx > 0.2 && dist_gnss > 0.001 && dist_gnss < 3.0){
+                    temp_gnss_yaw = std::atan2(dgy, dgx);
+                    
+                    while (temp_gnss_yaw > 2*M_PI){
+                        temp_gnss_yaw = temp_gnss_yaw - 2 * M_PI;
+                    }
+                    while (temp_gnss_yaw < - 2*M_PI){
+                        temp_gnss_yaw = temp_gnss_yaw + 2 * M_PI;
+                    }
+                    while (pre_yaw > 2*M_PI){
+                        pre_yaw = pre_yaw - 2 * M_PI;
+                    }
+                    while (pre_yaw < - 2*M_PI){
+                        pre_yaw = pre_yaw + 2 * M_PI;
+                    }
+
+                    RCLCPP_INFO(this->get_logger(), "temp_gnss_yaw: %lf, %lf", pre_yaw, temp_gnss_yaw);
+                    if(std::abs(pre_yaw - temp_gnss_yaw) > M_PI/5){
+                        yaw += diff_odrive_yaw;
+                        RCLCPP_INFO(this->get_logger(), "odrive_yaw: %lf", yaw);
+                    }else{
+                        yaw = temp_gnss_yaw;
+                        RCLCPP_INFO(this->get_logger(), "fix_yaw:%lf",yaw);
+                    }
+                }else{
+                    yaw += diff_odrive_yaw;
+                    RCLCPP_INFO(this->get_logger(), "odrive_yaw: %lf", yaw);
+                }
+                if(gnss_count % 20 == 0){
+                    pre_gnss_x = x;
+                    pre_gnss_y = y;
+                }
+                gnss_count ++;
+                switch_flag = true;
             }else{
-                x += diff_odrive_x;
-                y += diff_odrive_y;
+                if(switch_flag){
+                    switch_yaw = yaw - odrive_yaw;
+                }
+                auto [tx, ty] = transform_to_robot_frame(diff_odrive_x, diff_odrive_y, switch_yaw);
+                x += tx;
+                y += ty;
+                yaw += diff_odrive_yaw;
+                RCLCPP_INFO(this->get_logger(), "odrive_yaw: %lf", yaw);
+                switch_flag = false;
             }
 
             tf2::Quaternion odom_quat;
@@ -81,9 +126,17 @@ private:
             odom.twist.twist.angular.z = vth;
 
             switch_odom_pub->publish(odom);
+            pre_yaw = yaw;
         }
 
     }
+
+    std::pair<double, double> transform_to_robot_frame(double trans_x, double trans_y, double trans_yaw){
+        double x_in_robot = trans_x * cos(trans_yaw) - trans_y * sin(trans_yaw);
+        double y_in_robot = trans_y * cos(trans_yaw) + trans_x * sin(trans_yaw);
+        return {x_in_robot, y_in_robot};
+    }
+
     void topic_callback(const sensor_msgs::msg::NavSatFix::SharedPtr msg) {
         // status フィールドの status が 2 かを確認
         if (msg->status.status == 2) {
@@ -113,8 +166,8 @@ private:
         double roll_tmp, pitch_tmp, yaw_tmp;
         mat.getRPY(roll_tmp, pitch_tmp, yaw_tmp);
 
-        yaw = yaw_tmp;
-        RCLCPP_INFO(this->get_logger(), "yaw: %lf", yaw);
+        odrive_yaw = yaw_tmp;
+        //RCLCPP_INFO(this->get_logger(), "odrive_yaw: %lf", odrive_yaw);
         odrive_flag = true;
 
         // 並進速度(vx)と角速度(vth)の取得
@@ -124,9 +177,11 @@ private:
         //移動量を計算
         diff_odrive_x = odrive_x - pre_odrive_x;
         diff_odrive_y = odrive_y - pre_odrive_y;
+        diff_odrive_yaw = odrive_yaw - pre_odrive_yaw;
 
         pre_odrive_x = odrive_x;
         pre_odrive_y = odrive_y;
+        pre_odrive_yaw = odrive_yaw;
     }
 
     void send_static_transform()
@@ -156,9 +211,10 @@ private:
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::Time current_time;
 
-    double x, y, gnss_x, gnss_y, odrive_x, odrive_y, yaw, vx, vth;
-    double pre_odrive_x = 0, pre_odrive_y = 0, diff_odrive_x = 0, diff_odrive_y = 0;
-    bool status_flag = false, ublox_flag = false, gnss_flag = false, odrive_flag = false;
+    double x, y, gnss_x, gnss_y, odrive_x, odrive_y,odrive_yaw, yaw, vx, vth, temp_gnss_yaw, switch_yaw;
+    double pre_odrive_x = 0.0, pre_odrive_y = 0.0, pre_odrive_yaw = 0.0, diff_odrive_x = 0.0, diff_odrive_y = 0.0, diff_odrive_yaw = 0.0, pre_gnss_x = 0.0, pre_gnss_y = 0.0, pre_yaw = 0.0;
+    bool status_flag = false, ublox_flag = false, gnss_flag = false, odrive_flag = false, switch_flag = true;
+    int gnss_count = 0;
 };
 
 int main(int argc, char *argv[]) {
