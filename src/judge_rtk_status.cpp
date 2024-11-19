@@ -22,6 +22,8 @@ public:
             "/gnss_pose", 10, std::bind(&GPSSubscriber::pose_callback, this, _1));
         odrive_odom_sub = this->create_subscription<nav_msgs::msg::Odometry>(
         "odrive_odom", 10, std::bind(&GPSSubscriber::odometry_callback, this, _1));
+        emcl_sub_ = this->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
+            "/mcl_pose", 10, std::bind(&GPSSubscriber::emcl_callback, this, std::placeholders::_1));
 
         switch_odom_pub = this->create_publisher<nav_msgs::msg::Odometry>("switch_odom", 10);
 
@@ -31,14 +33,18 @@ public:
 
         timer_ = this->create_wall_timer(50ms, std::bind(&GPSSubscriber::timer_callback, this));
         // 静的な変換を送信するタイマー
-        static_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
-        send_static_transform();
+        //static_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
+        //send_static_transform();
     }
 
 private:
     void timer_callback()
     {
-        if(ublox_flag && gnss_flag && odrive_flag){
+        //後で削除
+        ublox_flag = true;
+        gnss_flag = true;
+        status_flag = false;
+        if(emcl_flag && ublox_flag && gnss_flag && odrive_flag){
 
             current_time = this->get_clock()->now();
 
@@ -82,6 +88,12 @@ private:
                     pre_gnss_y = y;
                 }
                 gnss_count ++;
+                switch_flag = true;
+            }else if(dist_emcl < 0.3){
+                x = emcl_x;
+                y = emcl_y;
+                yaw = emcl_yaw;
+                RCLCPP_INFO(this->get_logger(), "emcl_yaw: %lf", yaw);
                 switch_flag = true;
             }else{
                 if(switch_flag){
@@ -136,6 +148,37 @@ private:
         double y_in_robot = trans_y * cos(trans_yaw) + trans_x * sin(trans_yaw);
         return {x_in_robot, y_in_robot};
     }
+    void emcl_callback(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg){
+        const auto &emcl_pose = msg->pose.pose;
+        emcl_x = emcl_pose.position.x;
+        emcl_y = emcl_pose.position.y;
+        tf2::Quaternion quat;
+        tf2::fromMsg(emcl_pose.orientation, quat);
+        tf2::Matrix3x3 mat(quat);
+        double roll_tmp, pitch_tmp, yaw_tmp;
+        mat.getRPY(roll_tmp, pitch_tmp, yaw_tmp);
+
+        emcl_yaw = yaw_tmp;
+
+        if(!emcl_flag){
+            pre_emcl_x = emcl_x;
+            pre_emcl_y = emcl_y;
+            pre_emcl_yaw = emcl_yaw;
+        }
+
+        //移動量を計算
+        diff_emcl_x = emcl_x - pre_emcl_x;
+        diff_emcl_y = emcl_y - pre_emcl_y;
+        dist_emcl = std::hypot(diff_emcl_x, diff_emcl_y);
+
+        diff_emcl_yaw = emcl_yaw - pre_emcl_yaw;
+
+        pre_emcl_x = emcl_x;
+        pre_emcl_y = emcl_y;
+        pre_emcl_yaw = emcl_yaw;
+        emcl_flag = true;
+
+    }
 
     void topic_callback(const sensor_msgs::msg::NavSatFix::SharedPtr msg) {
         // status フィールドの status が 2 かを確認
@@ -183,7 +226,7 @@ private:
         pre_odrive_y = odrive_y;
         pre_odrive_yaw = odrive_yaw;
     }
-
+    /*
     void send_static_transform()
     {
         geometry_msgs::msg::TransformStamped static_transform_stamped;
@@ -198,13 +241,13 @@ private:
         static_transform_stamped.transform.rotation.z = 0.0;
         static_transform_stamped.transform.rotation.w = 1.0;
         static_broadcaster_->sendTransform(static_transform_stamped);
-    }
+    }*/
 
     rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr subscription_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odrive_odom_sub;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr gnss_sub_;
+    rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr emcl_sub_;
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr switch_odom_pub;
-
 
     std::shared_ptr<tf2_ros::TransformBroadcaster> odom_broadcaster;
     std::shared_ptr<tf2_ros::StaticTransformBroadcaster> static_broadcaster_;
@@ -212,8 +255,13 @@ private:
     rclcpp::Time current_time;
 
     double x, y, gnss_x, gnss_y, odrive_x, odrive_y,odrive_yaw, yaw, vx, vth, temp_gnss_yaw, switch_yaw;
+
+    double emcl_x, emcl_y, emcl_yaw, pre_emcl_x = 0.0, pre_emcl_y = 0.0, pre_emcl_yaw = 0.0, 
+        diff_emcl_x = 0.0, diff_emcl_y = 0.0, diff_emcl_yaw = 0.0, dist_emcl;
+
     double pre_odrive_x = 0.0, pre_odrive_y = 0.0, pre_odrive_yaw = 0.0, diff_odrive_x = 0.0, diff_odrive_y = 0.0, diff_odrive_yaw = 0.0, pre_gnss_x = 0.0, pre_gnss_y = 0.0, pre_yaw = 0.0;
-    bool status_flag = false, ublox_flag = false, gnss_flag = false, odrive_flag = false, switch_flag = true;
+
+    bool status_flag = false, ublox_flag = false, gnss_flag = false, odrive_flag = false, emcl_flag = false, switch_flag = true;
     int gnss_count = 0;
 };
 
