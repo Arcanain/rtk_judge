@@ -27,7 +27,7 @@ public:
 
         switch_odom_pub = this->create_publisher<nav_msgs::msg::Odometry>("switch_odom", 10);
 
-        odom_broadcaster = std::make_shared<tf2_ros::TransformBroadcaster>(*this);
+        //odom_broadcaster = std::make_shared<tf2_ros::TransformBroadcaster>(*this);
 
         current_time = this->get_clock()->now();
 
@@ -89,7 +89,7 @@ private:
                 }
                 gnss_count ++;
                 switch_flag = true;
-            }else if(dist_emcl < 0.3){
+            }else if(dist_emcl < 10.3){
                 x = emcl_x;
                 y = emcl_y;
                 yaw = emcl_yaw;
@@ -111,6 +111,7 @@ private:
             odom_quat.setRPY(0, 0, yaw);  // ロール、ピッチ、ヨーをセット
             geometry_msgs::msg::Quaternion odom_quat_msg =
                 tf2::toMsg(odom_quat);  // tf2::Quaternionからgeometry_msgs::msg::Quaternionに変換
+            /*
             geometry_msgs::msg::TransformStamped odom_trans;
             odom_trans.header.stamp = current_time;
             odom_trans.header.frame_id = "odom";
@@ -120,9 +121,8 @@ private:
             odom_trans.transform.translation.y = y;
             odom_trans.transform.translation.z = 0.0;
             odom_trans.transform.rotation = odom_quat_msg;
-
             odom_broadcaster->sendTransform(odom_trans);
-
+            */
             nav_msgs::msg::Odometry odom;
             odom.header.stamp = current_time;
             odom.header.frame_id = "odom";
@@ -241,7 +241,8 @@ private:
         static_transform_stamped.transform.rotation.z = 0.0;
         static_transform_stamped.transform.rotation.w = 1.0;
         static_broadcaster_->sendTransform(static_transform_stamped);
-    }*/
+    }
+    */
 
     rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr subscription_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odrive_odom_sub;
@@ -249,8 +250,8 @@ private:
     rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr emcl_sub_;
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr switch_odom_pub;
 
-    std::shared_ptr<tf2_ros::TransformBroadcaster> odom_broadcaster;
-    std::shared_ptr<tf2_ros::StaticTransformBroadcaster> static_broadcaster_;
+    //std::shared_ptr<tf2_ros::TransformBroadcaster> odom_broadcaster;
+    //std::shared_ptr<tf2_ros::StaticTransformBroadcaster> static_broadcaster_;
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::Time current_time;
 
