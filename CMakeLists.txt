@@ -13,6 +13,7 @@ find_package(tf2_geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(tf2_ros REQUIRED)
+find_package(visualization_msgs REQUIRED)
 # uncomment the following section in order to fill in
 # further dependencies manually.
 # find_package(<dependency> REQUIRED)
@@ -24,10 +25,14 @@ ament_target_dependencies(judge_rtk_status rclcpp sensor_msgs tf2_geometry_msgs 
 add_executable(switch_gnss_emcl src/switch_gnss_emcl.cpp)
 ament_target_dependencies(switch_gnss_emcl rclcpp sensor_msgs tf2_geometry_msgs nav_msgs geometry_msgs tf2_ros)
 
+add_executable(switch_gnss_emcl_status_visualization src/switch_gnss_emcl_status_visualization.cpp)
+ament_target_dependencies(switch_gnss_emcl_status_visualization rclcpp sensor_msgs tf2_geometry_msgs nav_msgs geometry_msgs tf2_ros visualization_msgs)
+
 # Install Cpp executables
 install(TARGETS
   judge_rtk_status
   switch_gnss_emcl
+  switch_gnss_emcl_status_visualization
   DESTINATION lib/${PROJECT_NAME}
 )
 
