@@ -21,9 +21,13 @@ find_package(tf2_ros REQUIRED)
 add_executable(judge_rtk_status src/judge_rtk_status.cpp)
 ament_target_dependencies(judge_rtk_status rclcpp sensor_msgs tf2_geometry_msgs nav_msgs geometry_msgs tf2_ros)
 
+add_executable(switch_gnss_emcl src/switch_gnss_emcl.cpp)
+ament_target_dependencies(switch_gnss_emcl rclcpp sensor_msgs tf2_geometry_msgs nav_msgs geometry_msgs tf2_ros)
+
 # Install Cpp executables
 install(TARGETS
   judge_rtk_status
+  switch_gnss_emcl
   DESTINATION lib/${PROJECT_NAME}
 )
 
