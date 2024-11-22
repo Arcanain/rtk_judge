@@ -27,7 +27,7 @@ public:
 
         switch_odom_pub = this->create_publisher<nav_msgs::msg::Odometry>("switch_odom", 10);
 
-        //odom_broadcaster = std::make_shared<tf2_ros::TransformBroadcaster>(*this);
+        odom_broadcaster = std::make_shared<tf2_ros::TransformBroadcaster>(*this);
 
         current_time = this->get_clock()->now();
 
@@ -111,18 +111,9 @@ private:
             odom_quat.setRPY(0, 0, yaw);  // ロール、ピッチ、ヨーをセット
             geometry_msgs::msg::Quaternion odom_quat_msg =
                 tf2::toMsg(odom_quat);  // tf2::Quaternionからgeometry_msgs::msg::Quaternionに変換
-            /*
-            geometry_msgs::msg::TransformStamped odom_trans;
-            odom_trans.header.stamp = current_time;
-            odom_trans.header.frame_id = "odom";
-            odom_trans.child_frame_id = "base_link";
 
-            odom_trans.transform.translation.x = x;
-            odom_trans.transform.translation.y = y;
-            odom_trans.transform.translation.z = 0.0;
-            odom_trans.transform.rotation = odom_quat_msg;
-            odom_broadcaster->sendTransform(odom_trans);
-            */
+            
+            
             nav_msgs::msg::Odometry odom;
             odom.header.stamp = current_time;
             odom.header.frame_id = "odom";
@@ -213,6 +204,22 @@ private:
         //RCLCPP_INFO(this->get_logger(), "odrive_yaw: %lf", odrive_yaw);
         odrive_flag = true;
 
+        tf2::Quaternion odrive_odom_quat;
+        odrive_odom_quat.setRPY(0, 0, odrive_yaw);  // ロール、ピッチ、ヨーをセット
+        geometry_msgs::msg::Quaternion odrive_odom_quat_msg =
+            tf2::toMsg(odrive_odom_quat);  // tf2::Quaternionからgeometry_msgs::msg::Quaternionに変換
+        
+        geometry_msgs::msg::TransformStamped odom_trans;
+        odom_trans.header.stamp = current_time;
+        odom_trans.header.frame_id = "odom";
+        odom_trans.child_frame_id = "base_link";
+
+        odom_trans.transform.translation.x = odrive_x;
+        odom_trans.transform.translation.y = odrive_y;
+        odom_trans.transform.translation.z = 0.0;
+        odom_trans.transform.rotation = odrive_odom_quat_msg;
+        odom_broadcaster->sendTransform(odom_trans);
+
         // 並進速度(vx)と角速度(vth)の取得
         vx = msg->twist.twist.linear.x;
         vth = msg->twist.twist.angular.z;
@@ -250,7 +257,7 @@ private:
     rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr emcl_sub_;
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr switch_odom_pub;
 
-    //std::shared_ptr<tf2_ros::TransformBroadcaster> odom_broadcaster;
+    std::shared_ptr<tf2_ros::TransformBroadcaster> odom_broadcaster;
     //std::shared_ptr<tf2_ros::StaticTransformBroadcaster> static_broadcaster_;
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::Time current_time;
