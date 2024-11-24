@@ -34,11 +34,11 @@ public:
         current_time = this->get_clock()->now();
 
         timer_ = this->create_wall_timer(50ms, std::bind(&GPSSubscriber::timer_callback, this));
-        start_roof_x = 0.0;
-        start_roof_y = 50.0;
+        start_roof_x = 0.49468;
+        start_roof_y = 0.0809078;
 
-        goal_roof_x = 5.0;
-        goal_roof_y = 40.0;
+        goal_roof_x = 110.068;
+        goal_roof_y = -67.6848;
 
 
         // 静的な変換を送信するタイマー
@@ -50,13 +50,8 @@ private:
     void timer_callback()
     {
         publish_marker();
-        //後で削除
-        ublox_flag = true;
-        gnss_flag = true;
-        status_flag = false;
-        
         if(emcl_flag && gnss_flag && odrive_flag){
-
+            RCLCPP_INFO(this->get_logger(), "run node");
             current_time = this->get_clock()->now();
 
             if(status_flag){
@@ -103,7 +98,7 @@ private:
                 double dgpy = gnss_y - start_roof_y;
                 double dist_roof = std::hypot(dgpx, dgpy);
                 //屋根下地点に到着した場合
-                if(dist_roof < 0.1){
+                if(dist_roof < 0.3){
                     status_flag = false;
                     // initialpose をパブリッシュ
                     geometry_msgs::msg::PoseWithCovarianceStamped initial_pose_msg;
@@ -260,7 +255,7 @@ private:
         double dgpx = emcl_x - goal_roof_x;
         double dgpy = emcl_x - goal_roof_y;
         double dist_roof = std::hypot(dgpx, dgpy);
-        if(dist_roof < 0.1){
+        if(dist_roof < 0.5){
             status_flag = false;
         }
 
@@ -289,6 +284,24 @@ private:
     {
         gnss_x = msg->pose.position.x;
         gnss_y = msg->pose.position.y;
+        double init_yaw = M_PI;
+        if (!gnss_flag){
+            tf2::Quaternion odom_quat;
+            odom_quat.setRPY(0, 0, init_yaw);  // ロール、ピッチ、ヨーをセット
+            geometry_msgs::msg::Quaternion odom_quat_msg =
+                tf2::toMsg(odom_quat);  // tf2::Quaternionからgeometry_msgs::msg::Quaternionに変換
+            
+            geometry_msgs::msg::TransformStamped odom_trans;
+            odom_trans.header.stamp = current_time;
+            odom_trans.header.frame_id = "odom";
+            odom_trans.child_frame_id = "base_link";
+
+            odom_trans.transform.translation.x = gnss_x;
+            odom_trans.transform.translation.y = gnss_y;
+            odom_trans.transform.translation.z = 0.0;
+            odom_trans.transform.rotation = odom_quat_msg;
+            odom_broadcaster->sendTransform(odom_trans);
+        }
         gnss_flag = true;
     }
 
@@ -304,7 +317,7 @@ private:
 
         odrive_yaw = yaw_tmp;
         //RCLCPP_INFO(this->get_logger(), "odrive_yaw: %lf", odrive_yaw);
-
+        
         if (!odrive_flag){
             tf2::Quaternion odrive_odom_quat;
             odrive_odom_quat.setRPY(0, 0, odrive_yaw);  // ロール、ピッチ、ヨーをセット
