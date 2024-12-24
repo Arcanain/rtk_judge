@@ -49,7 +49,7 @@ private:
                 double dgy = y - pre_gnss_y;
                 double dist_gnss = std::hypot(dgx, dgy);
                 RCLCPP_INFO(this->get_logger(), "vx, dist_gnss:%lf, %lf",vx, dist_gnss);
-                if(vx > 0.2 && dist_gnss > 0.001 && dist_gnss < 3.0){
+                if(vx > 0.2 && dist_gnss > 0.03 && dist_gnss < 3.0){
                     temp_gnss_yaw = std::atan2(dgy, dgx);
                     
                     while (temp_gnss_yaw > 2*M_PI){
@@ -65,8 +65,9 @@ private:
                         pre_yaw = pre_yaw + 2 * M_PI;
                     }
 
-                    RCLCPP_INFO(this->get_logger(), "temp_gnss_yaw: %lf, %lf", pre_yaw, temp_gnss_yaw);
-                    if(std::abs(pre_yaw - temp_gnss_yaw) > M_PI/5){
+                    RCLCPP_INFO(this->get_logger(), "temp_gnss_yaw: %lf, %lf, %lf", pre_yaw, temp_gnss_yaw, std::abs(std::abs(pre_yaw) - std::abs(temp_gnss_yaw)));
+                    RCLCPP_INFO(this->get_logger(), "M_PI/3: %lf", M_PI/3);
+                    if(std::abs(std::abs(pre_yaw) - std::abs(temp_gnss_yaw)) > M_PI/10){
                         yaw += diff_odrive_yaw;
                         RCLCPP_INFO(this->get_logger(), "odrive_yaw: %lf", yaw);
                     }else{
@@ -81,6 +82,7 @@ private:
                     pre_gnss_x = x;
                     pre_gnss_y = y;
                 }
+                pre_yaw = temp_gnss_yaw;
                 gnss_count ++;
                 switch_flag = true;
             }else{
@@ -126,7 +128,7 @@ private:
             odom.twist.twist.angular.z = vth;
 
             switch_odom_pub->publish(odom);
-            pre_yaw = yaw;
+            //pre_yaw = yaw;
         }
 
     }
