@@ -13,11 +13,11 @@ using namespace std::chrono_literals;
 
 class GPSSubscriber : public rclcpp::Node {
 public:
-    GPSSubscriber() : Node("judge_rtk_status") {
+    GPSSubscriber() : Node("switch_gnss_emcl") {
         // サブスクライバを作成して、コールバック関数を設定
-        subscription_ = this->create_subscription<sensor_msgs::msg::NavSatFix>(
+        /*subscription_ = this->create_subscription<sensor_msgs::msg::NavSatFix>(
             "/ublox_gps_node/fix", 10,
-            std::bind(&GPSSubscriber::topic_callback, this, std::placeholders::_1));
+            std::bind(&GPSSubscriber::topic_callback, this, std::placeholders::_1));*/
         gnss_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
             "/gnss_pose", 10, std::bind(&GPSSubscriber::pose_callback, this, _1));
         odrive_odom_sub = this->create_subscription<nav_msgs::msg::Odometry>(
@@ -26,12 +26,20 @@ public:
             "/mcl_pose", 10, std::bind(&GPSSubscriber::emcl_callback, this, std::placeholders::_1));
 
         switch_odom_pub = this->create_publisher<nav_msgs::msg::Odometry>("switch_odom", 10);
+        initial_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("initialpose", 2);
 
         odom_broadcaster = std::make_shared<tf2_ros::TransformBroadcaster>(*this);
 
         current_time = this->get_clock()->now();
 
         timer_ = this->create_wall_timer(50ms, std::bind(&GPSSubscriber::timer_callback, this));
+        start_roof_x = 0.49468;
+        start_roof_y = 0.0809078;
+
+        goal_roof_x = 110.068;
+        goal_roof_y = -67.6848;
+
+
         // 静的な変換を送信するタイマー
         //static_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
         //send_static_transform();
@@ -40,11 +48,7 @@ public:
 private:
     void timer_callback()
     {
-        //後で削除
-        ublox_flag = true;
-        gnss_flag = true;
-        status_flag = false;
-        if(emcl_flag && ublox_flag && gnss_flag && odrive_flag){
+        if(emcl_flag && gnss_flag && odrive_flag){
 
             current_time = this->get_clock()->now();
 
@@ -87,23 +91,57 @@ private:
                     pre_gnss_x = x;
                     pre_gnss_y = y;
                 }
+                
+                double dgpx = gnss_x - start_roof_x;
+                double dgpy = gnss_y - start_roof_y;
+                double dist_roof = std::hypot(dgpx, dgpy);
+                //屋根下地点に到着した場合
+                if(dist_roof < 0.1){
+                    status_flag = false;
+                    // initialpose をパブリッシュ
+                    geometry_msgs::msg::PoseWithCovarianceStamped initial_pose_msg;
+                    initial_pose_msg.header.stamp = current_time;
+                    initial_pose_msg.header.frame_id = "map";
+
+                    initial_pose_msg.pose.pose.position.x = x;
+                    initial_pose_msg.pose.pose.position.y = y;
+                    initial_pose_msg.pose.pose.position.z = 0.0;
+
+                    // yaw をクオータニオンに変換
+                    tf2::Quaternion quat;
+                    quat.setRPY(0, 0, yaw);
+                    initial_pose_msg.pose.pose.orientation = tf2::toMsg(quat);
+
+                    // 共分散行列（例: 位置と姿勢に適当な確信度を設定）
+                    for (int i = 0; i < 36; ++i) {
+                        initial_pose_msg.pose.covariance[i] = 0.0;
+                    }
+
+                    initial_pose_pub_->publish(initial_pose_msg);
+                }
+                odom_x = x;
+                odom_y = y;
+                odom_yaw = yaw;
+                
                 gnss_count ++;
                 switch_flag = true;
-            }else if(dist_emcl < 10.3){
+            }else{
+                if(switch_flag){
+                    odom_x = x;
+                    odom_y = y;
+                    odom_yaw = yaw;
+                    switch_yaw = yaw - odrive_yaw;
+                }
+
                 x = emcl_x;
                 y = emcl_y;
                 yaw = emcl_yaw;
                 RCLCPP_INFO(this->get_logger(), "emcl_yaw: %lf", yaw);
-                switch_flag = true;
-            }else{
-                if(switch_flag){
-                    switch_yaw = yaw - odrive_yaw;
-                }
+
                 auto [tx, ty] = transform_to_robot_frame(diff_odrive_x, diff_odrive_y, switch_yaw);
-                x += tx;
-                y += ty;
-                yaw += diff_odrive_yaw;
-                RCLCPP_INFO(this->get_logger(), "odrive_yaw: %lf", yaw);
+                odom_x += tx;
+                odom_y += ty;
+                odom_yaw += diff_odrive_yaw;
                 switch_flag = false;
             }
 
@@ -129,6 +167,26 @@ private:
             odom.twist.twist.angular.z = vth;
 
             switch_odom_pub->publish(odom);
+
+            tf2::Quaternion tf_quat;
+            tf_quat.setRPY(0, 0, odom_yaw);  // ロール、ピッチ、ヨーをセット
+            geometry_msgs::msg::Quaternion tf_quat_msg =
+                tf2::toMsg(tf_quat);  // tf2::Quaternionからgeometry_msgs::msg::Quaternionに変換
+
+            geometry_msgs::msg::TransformStamped odom_trans;
+            odom_trans.header.stamp = current_time;
+            odom_trans.header.frame_id = "odom";
+            odom_trans.child_frame_id = "base_link";
+
+            odom_trans.transform.translation.x = odom_x;
+            odom_trans.transform.translation.y = odom_y;
+            odom_trans.transform.translation.z = 0.0;
+            odom_trans.transform.rotation = tf_quat_msg;
+            odom_broadcaster->sendTransform(odom_trans);
+
+            RCLCPP_INFO(this->get_logger(), "odom_position: %lf, %lf, %lf", odom_x, odom_y, odom_yaw);
+            RCLCPP_INFO(this->get_logger(), "odrive_position: %lf, %lf, %lf", odrive_x, odrive_y, odrive_yaw);
+
             pre_yaw = yaw;
         }
 
@@ -164,14 +222,22 @@ private:
 
         diff_emcl_yaw = emcl_yaw - pre_emcl_yaw;
 
+        double dgpx = emcl_x - goal_roof_x;
+        double dgpy = emcl_x - goal_roof_y;
+        double dist_roof = std::hypot(dgpx, dgpy);
+        if(dist_roof < 0.1){
+            status_flag = false;
+        }
+
         pre_emcl_x = emcl_x;
         pre_emcl_y = emcl_y;
         pre_emcl_yaw = emcl_yaw;
         emcl_flag = true;
 
     }
-
+    /*
     void topic_callback(const sensor_msgs::msg::NavSatFix::SharedPtr msg) {
+        
         // status フィールドの status が 2 かを確認
         if (msg->status.status == 2) {
             RCLCPP_INFO(this->get_logger(), "Status is 2");
@@ -180,8 +246,9 @@ private:
         }else{
             status_flag = false;
         }
+        
         ublox_flag = true;
-    }
+    }*/
 
     void pose_callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
     {
@@ -202,23 +269,24 @@ private:
 
         odrive_yaw = yaw_tmp;
         //RCLCPP_INFO(this->get_logger(), "odrive_yaw: %lf", odrive_yaw);
-        odrive_flag = true;
 
-        tf2::Quaternion odrive_odom_quat;
-        odrive_odom_quat.setRPY(0, 0, odrive_yaw);  // ロール、ピッチ、ヨーをセット
-        geometry_msgs::msg::Quaternion odrive_odom_quat_msg =
-            tf2::toMsg(odrive_odom_quat);  // tf2::Quaternionからgeometry_msgs::msg::Quaternionに変換
-        
-        geometry_msgs::msg::TransformStamped odom_trans;
-        odom_trans.header.stamp = current_time;
-        odom_trans.header.frame_id = "odom";
-        odom_trans.child_frame_id = "base_link";
+        if (!odrive_flag){
+            tf2::Quaternion odrive_odom_quat;
+            odrive_odom_quat.setRPY(0, 0, odrive_yaw);  // ロール、ピッチ、ヨーをセット
+            geometry_msgs::msg::Quaternion odrive_odom_quat_msg =
+                tf2::toMsg(odrive_odom_quat);  // tf2::Quaternionからgeometry_msgs::msg::Quaternionに変換
+            
+            geometry_msgs::msg::TransformStamped odom_trans;
+            odom_trans.header.stamp = current_time;
+            odom_trans.header.frame_id = "odom";
+            odom_trans.child_frame_id = "base_link";
 
-        odom_trans.transform.translation.x = odrive_x;
-        odom_trans.transform.translation.y = odrive_y;
-        odom_trans.transform.translation.z = 0.0;
-        odom_trans.transform.rotation = odrive_odom_quat_msg;
-        odom_broadcaster->sendTransform(odom_trans);
+            odom_trans.transform.translation.x = odrive_x;
+            odom_trans.transform.translation.y = odrive_y;
+            odom_trans.transform.translation.z = 0.0;
+            odom_trans.transform.rotation = odrive_odom_quat_msg;
+            odom_broadcaster->sendTransform(odom_trans);
+        }
 
         // 並進速度(vx)と角速度(vth)の取得
         vx = msg->twist.twist.linear.x;
@@ -232,6 +300,7 @@ private:
         pre_odrive_x = odrive_x;
         pre_odrive_y = odrive_y;
         pre_odrive_yaw = odrive_yaw;
+        odrive_flag = true;
     }
     /*
     void send_static_transform()
@@ -251,26 +320,31 @@ private:
     }
     */
 
-    rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr subscription_;
+    //rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr subscription_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odrive_odom_sub;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr gnss_sub_;
     rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr emcl_sub_;
+
     rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr switch_odom_pub;
+    rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr initial_pose_pub_;
 
     std::shared_ptr<tf2_ros::TransformBroadcaster> odom_broadcaster;
     //std::shared_ptr<tf2_ros::StaticTransformBroadcaster> static_broadcaster_;
     rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::Time current_time;
 
-    double x, y, gnss_x, gnss_y, odrive_x, odrive_y,odrive_yaw, yaw, vx, vth, temp_gnss_yaw, switch_yaw;
+    double x = 0.0, y = 0.0, gnss_x, gnss_y, odrive_x, odrive_y, odrive_yaw, yaw = 0.0, vx, vth, temp_gnss_yaw, switch_yaw;
 
     double emcl_x, emcl_y, emcl_yaw, pre_emcl_x = 0.0, pre_emcl_y = 0.0, pre_emcl_yaw = 0.0, 
         diff_emcl_x = 0.0, diff_emcl_y = 0.0, diff_emcl_yaw = 0.0, dist_emcl;
 
     double pre_odrive_x = 0.0, pre_odrive_y = 0.0, pre_odrive_yaw = 0.0, diff_odrive_x = 0.0, diff_odrive_y = 0.0, diff_odrive_yaw = 0.0, pre_gnss_x = 0.0, pre_gnss_y = 0.0, pre_yaw = 0.0;
 
+    double start_roof_x, start_roof_y, goal_roof_x, goal_roof_y;
+
     bool status_flag = false, ublox_flag = false, gnss_flag = false, odrive_flag = false, emcl_flag = false, switch_flag = true;
     int gnss_count = 0;
+    double odom_x, odom_y, odom_yaw;
 };
 
 int main(int argc, char *argv[]) {
