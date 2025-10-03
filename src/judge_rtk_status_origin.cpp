@@ -14,35 +14,44 @@ using namespace std::chrono_literals;
 class GPSSubscriber : public rclcpp::Node {
 public:
     GPSSubscriber() : Node("judge_rtk_status_origin") {
-        // サブスクライバを作成して、コールバック関数を設定
+        
+        // SUBSCRIBERS
         subscription_ = this->create_subscription<sensor_msgs::msg::NavSatFix>(
             "/ublox_gps_node/fix", 10,
-            std::bind(&GPSSubscriber::topic_callback, this, std::placeholders::_1));
+            std::bind(&GPSSubscriber::fix_callback, this, std::placeholders::_1));
+            
         gnss_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
-            "/gnss_pose", 10, std::bind(&GPSSubscriber::pose_callback, this, _1));
+            "/gnss_pose", 10, std::bind(&GPSSubscriber::odompose_callback, this, _1));
+        
         odrive_odom_sub = this->create_subscription<nav_msgs::msg::Odometry>(
         "odrive_odom", 10, std::bind(&GPSSubscriber::odometry_callback, this, _1));
+        
 
+        // PUBLISHERS
         switch_odom_pub = this->create_publisher<nav_msgs::msg::Odometry>("switch_odom", 10);
 
+        // TF BROADCASTER
         odom_broadcaster = std::make_shared<tf2_ros::TransformBroadcaster>(*this);
 
-        current_time = this->get_clock()->now();
+        //current_time = this->get_clock()->now();
 
+        // TIMER CALLBACK
         timer_ = this->create_wall_timer(50ms, std::bind(&GPSSubscriber::timer_callback, this));
-        // 静的な変換を送信するタイマー
+
+        // 静的な変換を送信するタイマー 下の関数で1回だけ呼び出されている
         static_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(this);
+        
         send_static_transform();
     }
 
 private:
     void timer_callback()
     {
-        if(ublox_flag && gnss_flag && odrive_flag){
+        if(ublox_flag && gnss_flag && odrive_flag){//このフラグは起動後一度trueになったらずっとtrue
 
             current_time = this->get_clock()->now();
 
-            if(status_flag){
+            if(fix_flag){
                 x = gnss_x;
                 y = gnss_y;
                 double dgx = x - pre_gnss_x;
@@ -85,7 +94,9 @@ private:
                 pre_yaw = temp_gnss_yaw;
                 gnss_count ++;
                 switch_flag = true;
-            }else{
+            }
+            else
+            {
                 if(switch_flag){
                     switch_yaw = yaw - odrive_yaw;
                 }
@@ -128,7 +139,6 @@ private:
             odom.twist.twist.angular.z = vth;
 
             switch_odom_pub->publish(odom);
-            //pre_yaw = yaw;
         }
 
     }
@@ -139,19 +149,19 @@ private:
         return {x_in_robot, y_in_robot};
     }
 
-    void topic_callback(const sensor_msgs::msg::NavSatFix::SharedPtr msg) {
+    void fix_callback(const sensor_msgs::msg::NavSatFix::SharedPtr msg) {
         // status フィールドの status が 2 かを確認
         if (msg->status.status == 2) {
             RCLCPP_INFO(this->get_logger(), "Status is 2");
             //RCLCPP_INFO(this->get_logger(), "Latitude: %f, Longitude: %f, Altitude: %f", msg->latitude, msg->longitude, msg->altitude);
-            status_flag = true;
+            fix_flag = true;
         }else{
-            status_flag = false;
+            fix_flag = false;
         }
         ublox_flag = true;
     }
 
-    void pose_callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
+    void odompose_callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
     {
         gnss_x = msg->pose.position.x;
         gnss_y = msg->pose.position.y;
@@ -202,6 +212,7 @@ private:
         static_broadcaster_->sendTransform(static_transform_stamped);
     }
 
+    // 以下コンストラクタで初期化したメンバ変数
     rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr subscription_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odrive_odom_sub;
     rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr gnss_sub_;
@@ -215,7 +226,7 @@ private:
 
     double x, y, gnss_x, gnss_y, odrive_x, odrive_y,odrive_yaw, yaw, vx, vth, temp_gnss_yaw, switch_yaw;
     double pre_odrive_x = 0.0, pre_odrive_y = 0.0, pre_odrive_yaw = 0.0, diff_odrive_x = 0.0, diff_odrive_y = 0.0, diff_odrive_yaw = 0.0, pre_gnss_x = 0.0, pre_gnss_y = 0.0, pre_yaw = 0.0;
-    bool status_flag = true, ublox_flag = false, gnss_flag = false, odrive_flag = false, switch_flag = true;
+    bool fix_flag = true, ublox_flag = false, gnss_flag = false, odrive_flag = false, switch_flag = true;
     int gnss_count = 0;
 };
 
